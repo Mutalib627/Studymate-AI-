@@ -1,0 +1,22 @@
+project_id = "odgnjvecaijarptqggpp"
+
+[functions.ai-chat]
+verify_jwt = false
+
+[functions.generate-quiz]
+verify_jwt = false
+
+[functions.summarize-content]
+verify_jwt = false
+
+[functions.extract-text-from-image]
+verify_jwt = false
+
+[functions.extract-pdf-text]
+verify_jwt = false
+
+[functions.generate-image]
+verify_jwt = false
+
+[functions.kokoro-tts]
+verify_jwt = false
