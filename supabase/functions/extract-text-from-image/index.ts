@@ -20,14 +20,13 @@ serve(async (req) => {
       );
     }
 
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || "AIzaSyCQY2Zc79Qi3u3Xokq6Tkr3dGbF-HHW06U";
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
     if (!GEMINI_API_KEY) {
-      // API key is set
+      return new Response(JSON.stringify({ error: 'Gemini API key not configured' }), { status: 500, headers: corsHeaders });
     }
 
     console.log('Extracting text from image...');
 
-    // Support both base64 data URIs and plain URLs
     let imagePart: any;
     if (image.startsWith('data:')) {
       const matches = image.match(/^data:([^;]+);base64,(.+)$/);
