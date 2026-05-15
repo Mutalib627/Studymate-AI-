@@ -20,14 +20,13 @@ serve(async (req) => {
       );
     }
 
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || "AIzaSyCQY2Zc79Qi3u3Xokq6Tkr3dGbF-HHW06U";
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
     if (!GEMINI_API_KEY) {
-      // API key is set
+      return new Response(JSON.stringify({ error: 'Gemini API key not configured' }), { status: 500, headers: corsHeaders });
     }
 
     console.log('Generating image for prompt:', prompt);
 
-    // Use Imagen 3 via Gemini API for image generation
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`,
       {
@@ -77,4 +76,4 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
-});
+}); 
