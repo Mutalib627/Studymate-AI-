@@ -8,6 +8,50 @@ import logo from "@/assets/logo.png";
 
 type Mode = "signin" | "signup";
 
+// Moved OUTSIDE component to fix keyboard lag
+const FloatField = ({
+  id, type = "text", value, onChange, label, autoComplete,
+}: {
+  id: string; type?: string; value: string;
+  onChange: (v: string) => void; label: string; autoComplete?: string;
+}) => (
+  <div className="floating-input">
+    <input
+      id={id} type={type} value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder=" " autoComplete={autoComplete} required
+    />
+    <label htmlFor={id}>{label}</label>
+  </div>
+);
+
+// Moved OUTSIDE component to fix keyboard lag
+const PasswordField = ({
+  id, value, onChange, label, show, toggle, error, success,
+}: {
+  id: string; value: string; onChange: (v: string) => void;
+  label: string; show: boolean; toggle: () => void;
+  error?: boolean; success?: boolean;
+}) => (
+  <div className="floating-input">
+    <input
+      id={id} type={show ? "text" : "password"} value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder=" " required
+      className={error ? "!border-destructive" : success ? "!border-success" : ""}
+      style={{ paddingRight: "3rem" }}
+    />
+    <label htmlFor={id}>{label}</label>
+    <button
+      type="button"
+      onMouseDown={(e) => { e.preventDefault(); toggle(); }}
+      className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-muted-foreground hover:text-foreground"
+    >
+      {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+    </button>
+  </div>
+);
+
 const Auth = () => {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
@@ -77,39 +121,8 @@ const Auth = () => {
     } finally { setLoading(false); }
   };
 
-  const FloatField = ({
-    id, type = "text", value, onChange, label, autoComplete,
-  }: { id: string; type?: string; value: string; onChange: (v: string) => void; label: string; autoComplete?: string }) => (
-    <div className="floating-input">
-      <input id={id} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder=" " autoComplete={autoComplete} required />
-      <label htmlFor={id}>{label}</label>
-    </div>
-  );
-
-  const PasswordField = ({
-    id, value, onChange, label, show, toggle, error, success,
-  }: { id: string; value: string; onChange: (v: string) => void; label: string; show: boolean; toggle: () => void; error?: boolean; success?: boolean }) => (
-    <div className="floating-input">
-      <input
-        id={id}
-        type={show ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder=" "
-        required
-        className={error ? "!border-destructive" : success ? "!border-success" : ""}
-        style={{ paddingRight: "3rem" }}
-      />
-      <label htmlFor={id}>{label}</label>
-      <button type="button" onMouseDown={(e) => { e.preventDefault(); toggle(); }} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-muted-foreground hover:text-foreground">
-        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-gradient-subtle flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Decorative blobs */}
       <div className="absolute top-0 left-0 w-96 h-96 bg-primary/15 rounded-full blur-3xl -z-10" />
       <div className="absolute bottom-0 right-0 w-96 h-96 bg-primary-glow/15 rounded-full blur-3xl -z-10" />
 
@@ -137,7 +150,6 @@ const Auth = () => {
             </form>
           ) : (
             <>
-              {/* Tabs */}
               <div className="relative grid grid-cols-2 mb-6 p-1 bg-secondary rounded-full">
                 <div
                   className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gradient-primary rounded-full shadow-card transition-transform duration-300"
@@ -145,9 +157,7 @@ const Auth = () => {
                 />
                 {(["signin", "signup"] as Mode[]).map((m) => (
                   <button
-                    key={m}
-                    onClick={() => setMode(m)}
-                    type="button"
+                    key={m} onClick={() => setMode(m)} type="button"
                     className={`relative z-10 py-2.5 text-sm font-semibold rounded-full transition-colors ${mode === m ? "text-primary-foreground" : "text-muted-foreground"}`}
                   >
                     {m === "signin" ? "Sign In" : "Sign Up"}
@@ -194,7 +204,6 @@ const Auth = () => {
             </>
           )}
         </div>
-
         <p className="text-center text-xs text-muted-foreground mt-6">By continuing you agree to our Terms & Privacy Policy</p>
       </div>
     </div>
