@@ -5,7 +5,7 @@
 @layer base {
   :root {
     /* Studymate AI — premium blue design system */
-    --background: 222 100% 98%;          /* #F8FAFF */
+    --background: 222 100% 98%;
     --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
@@ -14,7 +14,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    --primary: 221 83% 53%;              /* #2563EB */
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
     --primary-glow: 217 91% 60%;
     --primary-dark: 224 76% 40%;
@@ -67,7 +67,7 @@
   }
 
   .dark {
-    --background: 222 47% 6%;            /* #0F172A */
+    --background: 222 47% 6%;
     --foreground: 210 40% 96%;
 
     --card: 222 40% 10%;
@@ -152,14 +152,20 @@
 }
 
 @layer components {
-  /* Floating-label input */
+  /* Floating-label input — fixed keyboard lag by removing transition-all */
   .floating-input { position: relative; }
   .floating-input input {
-    @apply w-full h-14 px-4 pt-5 pb-1 rounded-2xl bg-secondary/50 border border-border outline-none transition-all;
+    @apply w-full h-14 px-4 pt-5 pb-1 rounded-2xl bg-secondary/50 border border-border outline-none;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    will-change: auto;
   }
-  .floating-input input:focus { @apply border-primary bg-card; box-shadow: var(--shadow-focus); }
+  .floating-input input:focus {
+    @apply border-primary bg-card;
+    box-shadow: var(--shadow-focus);
+  }
   .floating-input label {
-    @apply absolute left-4 top-4 text-sm text-muted-foreground pointer-events-none transition-all;
+    @apply absolute left-4 top-4 text-sm text-muted-foreground pointer-events-none;
+    transition: font-size 0.15s ease, top 0.15s ease, color 0.15s ease;
   }
   .floating-input input:focus + label,
   .floating-input input:not(:placeholder-shown) + label {
@@ -185,5 +191,6 @@
 .animate-gradient { background-size: 200% 200%; animation: gradient-shift 6s ease infinite; }
 .animate-pulse-ring::before {
   content: ''; position: absolute; inset: 0; border-radius: 9999px;
-  background: hsl(var(--primary) / 0.4); animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
+  background: hsl(var(--primary) / 0.4);
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
