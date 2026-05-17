@@ -59,7 +59,6 @@ export const useBrowserSpeech = (options?: UseBrowserSpeechOptions) => {
   };
 };
 
-// Voice recognition hook using browser SpeechRecognition
 interface UseBrowserRecognitionOptions {
   onResult: (text: string) => void;
   onError?: (error: string) => void;
@@ -70,16 +69,27 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   const [isSupported, setIsSupported] = useState(false);
   const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<any>(null);
-  const finalTranscriptRef = useRef<string>("");
+  const accumulatedRef = useRef<string>("");
   const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onResultRef = useRef(options.onResult);
   const onErrorRef = useRef(options.onError);
   const hasSentRef = useRef(false);
+  const isListeningRef = useRef(false);
 
   useEffect(() => {
     onResultRef.current = options.onResult;
     onErrorRef.current = options.onError;
   }, [options.onResult, options.onError]);
+
+  const sendAccumulated = useCallback(() => {
+    const text = accumulatedRef.current.trim();
+    if (text && text.length >= 2 && !hasSentRef.current) {
+      hasSentRef.current = true;
+      onResultRef.current(text);
+      accumulatedRef.current = "";
+      setInterimText("");
+    }
+  }, []);
 
   useEffect(() => {
     const SpeechRecognitionAPI =
@@ -89,25 +99,25 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     if (!SpeechRecognitionAPI) return;
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = 3;
 
     recognition.onstart = () => {
       setIsListening(true);
-      finalTranscriptRef.current = "";
+      isListeningRef.current = true;
+      accumulatedRef.current = "";
       hasSentRef.current = false;
       setInterimText("");
     };
 
     recognition.onend = () => {
       setIsListening(false);
-      if (!hasSentRef.current && finalTranscriptRef.current.trim()) {
-        hasSentRef.current = true;
-        onResultRef.current(finalTranscriptRef.current.trim());
-      }
-      finalTranscriptRef.current = "";
+      isListeningRef.current = false;
+      // Send anything remaining
+      sendAccumulated();
+      accumulatedRef.current = "";
       setInterimText("");
       if (silenceTimeoutRef.current) {
         clearTimeout(silenceTimeoutRef.current);
@@ -116,12 +126,13 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognition.onerror = (event: any) => {
-      console.log('Recognition error:', event.error);
       if (event.error === 'aborted' || event.error === 'no-speech') {
         setIsListening(false);
+        isListeningRef.current = false;
         return;
       }
       setIsListening(false);
+      isListeningRef.current = false;
       setInterimText("");
       onErrorRef.current?.(event.error);
     };
@@ -132,28 +143,32 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
+        // Use the best alternative
         const transcript = result[0].transcript;
         if (result.isFinal) {
-          finalTranscript = transcript;
+          finalTranscript += transcript;
         } else {
-          interimTranscript = transcript;
+          interimTranscript += transcript;
         }
       }
 
-      if (finalTranscript) {
-        finalTranscriptRef.current = finalTranscript;
+      if (finalTranscript.trim()) {
+        // Accumulate final text
+        accumulatedRef.current = (
+          accumulatedRef.current + " " + finalTranscript.trim()
+        ).trim();
         setInterimText("");
+
+        // Reset silence timer — send after 1.5 seconds of silence
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = setTimeout(() => {
-          if (finalTranscriptRef.current.trim() && !hasSentRef.current) {
-            hasSentRef.current = true;
-            const textToSend = finalTranscriptRef.current.trim();
-            onResultRef.current(textToSend);
-            try { recognition.stop(); } catch {}
-          }
-        }, 800);
+          sendAccumulated();
+          // Stop listening after sending
+          try { recognition.stop(); } catch {}
+        }, 1500);
       } else if (interimTranscript) {
         setInterimText(interimTranscript);
+        // Reset silence timer on interim activity
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
       }
     };
@@ -164,13 +179,11 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
       if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
       try { recognition.abort(); } catch {}
     };
-  }, []);
+  }, [sendAccumulated]);
 
   const start = useCallback(() => {
-    if (!recognitionRef.current) return;
-    // DO NOT call getUserMedia here
-    // Let SpeechRecognition handle mic access on its own
-    finalTranscriptRef.current = "";
+    if (!recognitionRef.current || isListeningRef.current) return;
+    accumulatedRef.current = "";
     hasSentRef.current = false;
     setInterimText("");
     try {
@@ -180,8 +193,8 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
         try { recognitionRef.current.stop(); } catch {}
         setTimeout(() => {
           try {
+            accumulatedRef.current = "";
             hasSentRef.current = false;
-            finalTranscriptRef.current = "";
             recognitionRef.current?.start();
           } catch {}
         }, 300);
@@ -191,8 +204,9 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
 
   const stop = useCallback(() => {
     if (!recognitionRef.current) return;
+    sendAccumulated();
     try { recognitionRef.current.stop(); } catch {}
-  }, []);
+  }, [sendAccumulated]);
 
   const toggle = useCallback(() => {
     if (isListening) stop();
@@ -207,4 +221,4 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     isSupported,
     interimText,
   };
-};
+}; 
