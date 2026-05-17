@@ -31,8 +31,7 @@ export const useContinuousVoiceChat = ({
   const onErrorRef = useRef(onError);
   const onSpeechDetectedRef = useRef(onSpeechDetected);
   const shouldRestartRef = useRef(false);
-  const isRestartingRef = useRef(false);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const isStartingRef = useRef(false);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
@@ -46,45 +45,42 @@ export const useContinuousVoiceChat = ({
       shouldRestartRef.current = false;
       setTimeout(() => {
         if (isActiveRef.current && !isTTSPlayingRef.current) {
-          startListening();
+          tryStart();
         }
-      }, 500);
+      }, 800);
     }
     if (isTTSPlaying && isActiveRef.current) {
       shouldRestartRef.current = true;
-      stopListening();
+      tryStop();
     }
   }, [isTTSPlaying]);
 
-  const startListening = useCallback(() => {
+  const tryStart = useCallback(() => {
     if (
       !recognitionRef.current ||
       isTTSPlayingRef.current ||
-      isRestartingRef.current
+      isStartingRef.current
     ) return;
 
-    isRestartingRef.current = true;
+    isStartingRef.current = true;
     finalTranscriptRef.current = "";
     setInterimText("");
 
     try {
       recognitionRef.current.start();
     } catch (e: any) {
-      // Already started — ignore
-    } finally {
-      setTimeout(() => {
-        isRestartingRef.current = false;
-      }, 300);
+      isStartingRef.current = false;
     }
   }, []);
 
-  const stopListening = useCallback(() => {
+  const tryStop = useCallback(() => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+    isStartingRef.current = false;
     try {
-      recognitionRef.current?.abort();
+      recognitionRef.current?.stop();
     } catch {}
     setIsListening(false);
   }, []);
@@ -100,66 +96,73 @@ export const useContinuousVoiceChat = ({
     }
     setIsSupported(true);
 
-    // Request mic once and keep stream alive
-    // This stops the mic from toggling on/off repeatedly
-    navigator.mediaDevices
-      ?.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
-      .then((stream) => {
-        mediaStreamRef.current = stream;
-      })
-      .catch(() => {});
-
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true; // Keep listening continuously
+    // IMPORTANT: Do NOT use continuous=true on Android
+    // It causes audio-capture errors
+    // Instead use continuous=false and restart manually
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
       setIsListening(true);
-      isRestartingRef.current = false;
+      isStartingRef.current = false;
+      console.log("Recognition started");
     };
 
     recognition.onend = () => {
       setIsListening(false);
-      isRestartingRef.current = false;
+      isStartingRef.current = false;
+      console.log("Recognition ended");
 
-      // Auto restart only if still active and not TTS playing
-      if (isActiveRef.current && !isTTSPlayingRef.current && !shouldRestartRef.current) {
+      // Auto restart if still active and TTS not playing
+      if (
+        isActiveRef.current &&
+        !isTTSPlayingRef.current &&
+        !shouldRestartRef.current
+      ) {
         setTimeout(() => {
-          if (isActiveRef.current && !isTTSPlayingRef.current) {
-            try {
-              recognition.start();
-            } catch {}
+          if (
+            isActiveRef.current &&
+            !isTTSPlayingRef.current &&
+            !isStartingRef.current
+          ) {
+            tryStart();
           }
-        }, 200);
+        }, 300);
       }
     };
 
     recognition.onerror = (event: any) => {
-      isRestartingRef.current = false;
-      if (
-        event.error === "aborted" ||
-        event.error === "no-speech" ||
-        event.error === "network"
-      ) {
-        // Auto restart on these non-critical errors
+      isStartingRef.current = false;
+      console.log("Recognition error:", event.error);
+
+      if (event.error === "aborted") return;
+
+      if (event.error === "no-speech") {
+        // Restart on no-speech
         if (isActiveRef.current && !isTTSPlayingRef.current) {
-          setTimeout(() => {
-            if (isActiveRef.current && !isTTSPlayingRef.current) {
-              try { recognition.start(); } catch {}
-            }
-          }, 300);
+          setTimeout(() => tryStart(), 300);
         }
         return;
       }
-      onErrorRef.current?.(event.error);
+
+      if (event.error === "audio-capture") {
+        // Mic not available — notify user
+        onErrorRef.current?.("not-allowed");
+        return;
+      }
+
+      if (event.error === "not-allowed") {
+        onErrorRef.current?.("not-allowed");
+        return;
+      }
+
+      // For other errors retry
+      if (isActiveRef.current && !isTTSPlayingRef.current) {
+        setTimeout(() => tryStart(), 1000);
+      }
     };
 
     recognition.onresult = (event: any) => {
@@ -168,31 +171,29 @@ export const useContinuousVoiceChat = ({
         return;
       }
 
-      let interimTranscript = "";
-      let finalTranscript = "";
+      let interim = "";
+      let final = "";
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const transcript = result[0].transcript;
-        if (result.isFinal) {
-          finalTranscript += transcript;
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript;
         } else {
-          interimTranscript += transcript;
+          interim += transcript;
         }
       }
 
-      if (interimTranscript) {
-        setInterimText(interimTranscript);
-        // Reset silence timer while user is still speaking
+      if (interim) {
+        setInterimText(interim);
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       }
 
-      if (finalTranscript.trim()) {
-        finalTranscriptRef.current += " " + finalTranscript.trim();
-        finalTranscriptRef.current = finalTranscriptRef.current.trim();
+      if (final.trim()) {
+        finalTranscriptRef.current =
+          (finalTranscriptRef.current + " " + final.trim()).trim();
         setInterimText("");
 
-        // Start 5 second silence timer
+        // Start silence timer
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = setTimeout(() => {
           const textToSend = finalTranscriptRef.current.trim();
@@ -210,8 +211,6 @@ export const useContinuousVoiceChat = ({
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       try { recognition.abort(); } catch {}
-      // Release mic stream
-      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -219,24 +218,21 @@ export const useContinuousVoiceChat = ({
     isActiveRef.current = true;
     shouldRestartRef.current = false;
     setIsActive(true);
-    startListening();
-  }, [startListening]);
+    setTimeout(() => tryStart(), 200);
+  }, [tryStart]);
 
   const deactivate = useCallback(() => {
     isActiveRef.current = false;
     shouldRestartRef.current = false;
     setIsActive(false);
-    stopListening();
+    tryStop();
     const remaining = finalTranscriptRef.current.trim();
     if (remaining && remaining.length >= 3) {
       onTranscriptRef.current(remaining);
     }
     finalTranscriptRef.current = "";
     setInterimText("");
-    // Release mic
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-    mediaStreamRef.current = null;
-  }, [stopListening]);
+  }, [tryStop]);
 
   const toggle = useCallback(() => {
     if (isActive) deactivate();
@@ -253,4 +249,4 @@ export const useContinuousVoiceChat = ({
     toggle,
     currentTranscript: finalTranscriptRef.current,
   };
-};
+}; 
