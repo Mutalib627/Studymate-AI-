@@ -10,7 +10,12 @@ interface VoiceRecorderProps {
   autoSend?: boolean;
 }
 
-const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true }: VoiceRecorderProps) => {
+const VoiceRecorder = ({
+  onTranscription,
+  onAutoSend,
+  disabled,
+  autoSend = true,
+}: VoiceRecorderProps) => {
   const { toast } = useToast();
 
   const { toggle, isListening, isSupported, interimText } = useBrowserRecognition({
@@ -23,10 +28,11 @@ const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true 
     },
     onError: (error) => {
       toast({
-        title: "Speech recognition error",
-        description: error === 'not-allowed' 
-          ? "Please allow microphone access to use voice input"
-          : `Error: ${error}`,
+        title: "Microphone error",
+        description:
+          error === "not-allowed" || error === "audio-capture"
+            ? "Please allow microphone access in your browser settings"
+            : `Speech error: ${error}`,
         variant: "destructive",
       });
     },
@@ -36,12 +42,11 @@ const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true 
     if (!isSupported) {
       toast({
         title: "Not supported",
-        description: "Speech recognition is not supported in your browser. Try Chrome or Edge.",
+        description: "Please use Chrome or Edge browser for voice input.",
         variant: "destructive",
       });
       return;
     }
-
     toggle();
   };
 
@@ -56,9 +61,13 @@ const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true 
         onClick={handleClick}
         disabled={disabled}
         className={`rounded-xl transition-all ${
-          isListening ? 'animate-pulse ring-2 ring-destructive/50' : ''
+          isListening ? "ring-2 ring-destructive/50" : ""
         }`}
-        title={isListening ? "Stop recording" : "Start voice input (auto-sends when you pause)"}
+        title={
+          isListening
+            ? "Tap to stop — message sends automatically after pause"
+            : "Tap to speak"
+        }
       >
         {isListening ? (
           <MicOff className="h-5 w-5" />
@@ -66,11 +75,21 @@ const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true 
           <Mic className="h-5 w-5" />
         )}
       </Button>
-      {isListening && interimText && (
-        <div className="absolute bottom-full mb-2 left-0 right-0 min-w-[200px] max-w-[300px] bg-card border border-border rounded-lg p-2 shadow-lg text-sm text-muted-foreground">
+
+      {/* Interim text bubble */}
+      {isListening && (
+        <div className="absolute bottom-full mb-2 left-0 min-w-[200px] max-w-[280px] bg-card border border-border rounded-xl p-2.5 shadow-lg text-sm text-muted-foreground z-10">
           <div className="flex items-center gap-2">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span className="truncate">{interimText}</span>
+            <div className="flex gap-0.5">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            {interimText ? (
+              <span className="truncate">{interimText}</span>
+            ) : (
+              <span className="text-muted-foreground">Listening...</span>
+            )}
           </div>
         </div>
       )}
@@ -78,4 +97,4 @@ const VoiceRecorder = ({ onTranscription, onAutoSend, disabled, autoSend = true 
   );
 };
 
-export default VoiceRecorder;
+export default VoiceRecorder; 
