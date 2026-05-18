@@ -32,22 +32,16 @@ export const useBrowserSpeech = (options?: UseBrowserSpeechOptions) => {
       onError: options?.onError,
     });
 
-  const speak = useCallback(
-    (text: string) => {
-      const cleaned = cleanTextForSpeech(text);
-      if (!cleaned) return;
-      kokoroSpeak(cleaned);
-    },
-    [kokoroSpeak],
-  );
+  const speak = useCallback((text: string) => {
+    const cleaned = cleanTextForSpeech(text);
+    if (!cleaned) return;
+    kokoroSpeak(cleaned);
+  }, [kokoroSpeak]);
 
-  const toggle = useCallback(
-    (text: string) => {
-      if (isSpeaking || isLoading) kokoroStop();
-      else speak(text);
-    },
-    [isSpeaking, isLoading, kokoroStop, speak],
-  );
+  const toggle = useCallback((text: string) => {
+    if (isSpeaking || isLoading) kokoroStop();
+    else speak(text);
+  }, [isSpeaking, isLoading, kokoroStop, speak]);
 
   return {
     speak,
@@ -73,17 +67,17 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onResultRef = useRef(options.onResult);
   const onErrorRef = useRef(options.onError);
-  const hasSentRef = useRef(false);
   const isListeningRef = useRef(false);
-  // KEY FIX: track the index of the last processed final result
-  const lastProcessedIndexRef = useRef(0);
+  const sentRef = useRef(false);
+  // Store the single clean final result
+  const finalResultRef = useRef("");
 
   useEffect(() => {
     onResultRef.current = options.onResult;
     onErrorRef.current = options.onError;
   }, [options.onResult, options.onError]);
 
-  const clearSilenceTimer = () => {
+  const clearTimer = () => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
@@ -91,14 +85,15 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   };
 
   useEffect(() => {
-    const SpeechRecognitionAPI =
+    const API =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-    setIsSupported(!!SpeechRecognitionAPI);
-    if (!SpeechRecognitionAPI) return;
+    setIsSupported(!!API);
+    if (!API) return;
 
-    const recognition = new SpeechRecognitionAPI();
-    // continuous=false on Android is more reliable for single utterances
+    const recognition = new API();
+    // continuous=false: fires one clean result then stops
+    // This avoids the accumulation problem entirely
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
@@ -107,16 +102,24 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     recognition.onstart = () => {
       setIsListening(true);
       isListeningRef.current = true;
-      hasSentRef.current = false;
-      lastProcessedIndexRef.current = 0;
+      sentRef.current = false;
+      finalResultRef.current = "";
       setInterimText("");
     };
 
     recognition.onend = () => {
       setIsListening(false);
       isListeningRef.current = false;
-      clearSilenceTimer();
+      clearTimer();
       setInterimText("");
+
+      // Send whatever we have when recognition ends naturally
+      const text = finalResultRef.current.trim();
+      if (text && !sentRef.current) {
+        sentRef.current = true;
+        onResultRef.current(text);
+      }
+      finalResultRef.current = "";
     };
 
     recognition.onerror = (event: any) => {
@@ -132,52 +135,57 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognition.onresult = (event: any) => {
-      // KEY FIX: Only process NEW results using resultIndex
-      // This stops words from being repeated
-      let newFinalText = "";
-      let currentInterim = "";
+      // With continuous=false, event.results contains ONE utterance
+      // The last result is the most complete version
+      // We take ONLY the final result when isFinal=true
 
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      // Only look at results from resultIndex onwards — ignore old ones
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        const transcript = result[0].transcript.trim();
+        const text = result[0].transcript;
         if (result.isFinal) {
-          newFinalText += (newFinalText ? " " : "") + transcript;
+          finalTranscript = text; // Replace, not append
         } else {
-          currentInterim = transcript;
+          interimTranscript = text; // Replace, not append
         }
       }
 
-      // Update interim display
-      if (currentInterim) {
-        setInterimText(currentInterim);
-        clearSilenceTimer();
+      if (interimTranscript) {
+        setInterimText(interimTranscript);
       }
 
-      if (newFinalText) {
+      if (finalTranscript.trim()) {
+        finalResultRef.current = finalTranscript.trim();
         setInterimText("");
-        clearSilenceTimer();
+        clearTimer();
 
-        if (!hasSentRef.current) {
-          hasSentRef.current = true;
-          onResultRef.current(newFinalText);
-        }
-
-        try { recognition.stop(); } catch {}
+        // Send after short pause
+        silenceTimerRef.current = setTimeout(() => {
+          if (!sentRef.current && finalResultRef.current) {
+            sentRef.current = true;
+            onResultRef.current(finalResultRef.current);
+            finalResultRef.current = "";
+            try { recognition.stop(); } catch {}
+          }
+        }, 800);
       }
     };
 
     recognitionRef.current = recognition;
 
     return () => {
-      clearSilenceTimer();
+      clearTimer();
       try { recognition.abort(); } catch {}
     };
   }, []);
 
   const start = useCallback(() => {
     if (!recognitionRef.current || isListeningRef.current) return;
-    hasSentRef.current = false;
-    lastProcessedIndexRef.current = 0;
+    sentRef.current = false;
+    finalResultRef.current = "";
     setInterimText("");
     try {
       recognitionRef.current.start();
@@ -185,7 +193,8 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
       if (e.message?.includes('already started')) {
         try { recognitionRef.current.stop(); } catch {}
         setTimeout(() => {
-          hasSentRef.current = false;
+          sentRef.current = false;
+          finalResultRef.current = "";
           try { recognitionRef.current?.start(); } catch {}
         }, 400);
       }
@@ -193,7 +202,7 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   }, []);
 
   const stop = useCallback(() => {
-    clearSilenceTimer();
+    clearTimer();
     try { recognitionRef.current?.stop(); } catch {}
   }, []);
 
@@ -202,12 +211,5 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     else start();
   }, [isListening, start, stop]);
 
-  return {
-    start,
-    stop,
-    toggle,
-    isListening,
-    isSupported,
-    interimText,
-  };
-};
+  return { start, stop, toggle, isListening, isSupported, interimText };
+}; 
