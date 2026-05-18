@@ -29,6 +29,7 @@ export const useContinuousVoiceChat = ({
   const isTTSPlayingRef = useRef(false);
   const shouldRestartRef = useRef(false);
   const isStartingRef = useRef(false);
+  const processingRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
   const onErrorRef = useRef(onError);
   const onSpeechDetectedRef = useRef(onSpeechDetected);
@@ -43,7 +44,7 @@ export const useContinuousVoiceChat = ({
     isTTSPlayingRef.current = isTTSPlaying;
     if (!isTTSPlaying && isActiveRef.current && shouldRestartRef.current) {
       shouldRestartRef.current = false;
-      setTimeout(() => tryStart(), 600);
+      setTimeout(() => tryStart(), 800);
     }
     if (isTTSPlaying && isActiveRef.current) {
       shouldRestartRef.current = true;
@@ -58,13 +59,26 @@ export const useContinuousVoiceChat = ({
     }
   };
 
+  // KEY FIX: Send transcript directly — no extra checks blocking it
   const sendTranscript = useCallback(() => {
     const text = finalTextRef.current.trim();
-    if (text.length >= minTranscriptLength) {
+    console.log('Attempting to send transcript:', text, 'length:', text.length, 'processing:', processingRef.current);
+
+    if (text.length >= minTranscriptLength && !processingRef.current) {
+      processingRef.current = true;
+      console.log('Sending transcript to AI:', text);
       onTranscriptRef.current(text);
+      // Reset after sending
+      finalTextRef.current = "";
+      setInterimText("");
+      // Allow next transcript after 3 seconds
+      setTimeout(() => {
+        processingRef.current = false;
+      }, 3000);
+    } else {
+      finalTextRef.current = "";
+      setInterimText("");
     }
-    finalTextRef.current = "";
-    setInterimText("");
   }, [minTranscriptLength]);
 
   const tryStart = useCallback(() => {
@@ -80,9 +94,10 @@ export const useContinuousVoiceChat = ({
 
     try {
       recognitionRef.current.start();
+      console.log('Recognition started');
     } catch (e: any) {
       isStartingRef.current = false;
-      // Already started — ignore
+      console.log('Start error:', e.message);
     }
   }, []);
 
@@ -105,8 +120,6 @@ export const useContinuousVoiceChat = ({
     setIsSupported(true);
 
     const recognition = new SpeechRecognitionAPI();
-    // IMPORTANT: continuous=true keeps mic open on Android
-    // Do NOT call getUserMedia separately — causes audio-capture conflict
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
@@ -115,13 +128,15 @@ export const useContinuousVoiceChat = ({
     recognition.onstart = () => {
       setIsListening(true);
       isStartingRef.current = false;
+      console.log('Voice chat recognition started');
     };
 
     recognition.onend = () => {
       setIsListening(false);
       isStartingRef.current = false;
+      console.log('Voice chat recognition ended');
 
-      // Auto restart only when active and TTS not playing
+      // Auto restart if still active
       if (
         isActiveRef.current &&
         !isTTSPlayingRef.current &&
@@ -134,20 +149,23 @@ export const useContinuousVoiceChat = ({
             !isStartingRef.current
           ) {
             isStartingRef.current = true;
-            try { recognition.start(); }
-            catch { isStartingRef.current = false; }
+            try {
+              recognition.start();
+            } catch {
+              isStartingRef.current = false;
+            }
           }
-        }, 250);
+        }, 300);
       }
     };
 
     recognition.onerror = (event: any) => {
       isStartingRef.current = false;
+      console.log('Voice chat error:', event.error);
 
       if (event.error === "aborted") return;
 
       if (event.error === "no-speech") {
-        // Restart on no-speech
         if (isActiveRef.current && !isTTSPlayingRef.current) {
           setTimeout(() => {
             if (isActiveRef.current && !isTTSPlayingRef.current) {
@@ -155,7 +173,7 @@ export const useContinuousVoiceChat = ({
               try { recognition.start(); }
               catch { isStartingRef.current = false; }
             }
-          }, 300);
+          }, 500);
         }
         return;
       }
@@ -165,8 +183,7 @@ export const useContinuousVoiceChat = ({
         return;
       }
 
-      // Other errors — try restart
-      if (isActiveRef.current && !isTTSPlayingRef.current) {
+      if (isActiveRef.current) {
         setTimeout(() => {
           if (isActiveRef.current) {
             isStartingRef.current = true;
@@ -178,40 +195,47 @@ export const useContinuousVoiceChat = ({
     };
 
     recognition.onresult = (event: any) => {
-      // If TTS playing — interrupt it
       if (isTTSPlayingRef.current) {
         onSpeechDetectedRef.current?.();
         return;
       }
 
-      // Rebuild transcript fresh from all results
-      let fullFinal = "";
+      // KEY FIX: Only process NEW results from resultIndex
+      let newFinalText = "";
       let latestInterim = "";
 
-      for (let i = 0; i < event.results.length; i++) {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        const transcript = result[0].transcript;
+        const transcript = result[0].transcript.trim();
         if (result.isFinal) {
-          fullFinal += transcript;
+          newFinalText += (newFinalText ? " " : "") + transcript;
         } else {
           latestInterim = transcript;
         }
       }
 
       // Update interim — replace not append
-      setInterimText(latestInterim);
-
-      if (fullFinal.trim()) {
-        finalTextRef.current = fullFinal.trim();
+      if (latestInterim) {
+        setInterimText(latestInterim);
         clearSilenceTimer();
+        console.log('Interim:', latestInterim);
+      }
 
-        // Send after 5 seconds of silence
+      if (newFinalText) {
+        // Append new final text to accumulated
+        finalTextRef.current = finalTextRef.current
+          ? finalTextRef.current + " " + newFinalText
+          : newFinalText;
+
+        setInterimText("");
+        console.log('Final accumulated:', finalTextRef.current);
+
+        // KEY FIX: Start silence timer — send after user stops talking
+        clearSilenceTimer();
         silenceTimerRef.current = setTimeout(() => {
+          console.log('Silence timer fired — sending transcript');
           sendTranscript();
         }, silenceThreshold);
-      } else if (latestInterim) {
-        // User still speaking — reset timer
-        clearSilenceTimer();
       }
     };
 
@@ -226,9 +250,9 @@ export const useContinuousVoiceChat = ({
   const activate = useCallback(() => {
     isActiveRef.current = true;
     shouldRestartRef.current = false;
+    processingRef.current = false;
     setIsActive(true);
-    // Small delay to ensure component is mounted
-    setTimeout(() => tryStart(), 200);
+    setTimeout(() => tryStart(), 300);
   }, [tryStart]);
 
   const deactivate = useCallback(() => {
@@ -236,9 +260,14 @@ export const useContinuousVoiceChat = ({
     shouldRestartRef.current = false;
     setIsActive(false);
     tryStop();
-    sendTranscript();
+    // Send any remaining transcript
+    const remaining = finalTextRef.current.trim();
+    if (remaining && remaining.length >= minTranscriptLength && !processingRef.current) {
+      onTranscriptRef.current(remaining);
+    }
+    finalTextRef.current = "";
     setInterimText("");
-  }, [tryStop, sendTranscript]);
+  }, [tryStop, minTranscriptLength]);
 
   const toggle = useCallback(() => {
     if (isActive) deactivate();
@@ -255,4 +284,4 @@ export const useContinuousVoiceChat = ({
     toggle,
     currentTranscript: finalTextRef.current,
   };
-}; 
+};
