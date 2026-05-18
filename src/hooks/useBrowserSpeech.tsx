@@ -68,9 +68,10 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [interimText, setInterimText] = useState("");
+
   const recognitionRef = useRef<any>(null);
-  const accumulatedRef = useRef<string>("");
-  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalTextRef = useRef<string>("");
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onResultRef = useRef(options.onResult);
   const onErrorRef = useRef(options.onError);
   const hasSentRef = useRef(false);
@@ -81,12 +82,19 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     onErrorRef.current = options.onError;
   }, [options.onResult, options.onError]);
 
-  const sendAccumulated = useCallback(() => {
-    const text = accumulatedRef.current.trim();
-    if (text && text.length >= 2 && !hasSentRef.current) {
+  const clearSilenceTimer = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  };
+
+  const sendFinal = useCallback(() => {
+    const text = finalTextRef.current.trim();
+    if (text.length >= 2 && !hasSentRef.current) {
       hasSentRef.current = true;
       onResultRef.current(text);
-      accumulatedRef.current = "";
+      finalTextRef.current = "";
       setInterimText("");
     }
   }, []);
@@ -95,19 +103,23 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     const SpeechRecognitionAPI =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-    setIsSupported(!!SpeechRecognitionAPI);
-    if (!SpeechRecognitionAPI) return;
+
+    if (!SpeechRecognitionAPI) {
+      setIsSupported(false);
+      return;
+    }
+    setIsSupported(true);
 
     const recognition = new SpeechRecognitionAPI();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.maxAlternatives = 3;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
       setIsListening(true);
       isListeningRef.current = true;
-      accumulatedRef.current = "";
+      finalTextRef.current = "";
       hasSentRef.current = false;
       setInterimText("");
     };
@@ -115,18 +127,14 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     recognition.onend = () => {
       setIsListening(false);
       isListeningRef.current = false;
-      // Send anything remaining
-      sendAccumulated();
-      accumulatedRef.current = "";
+      clearSilenceTimer();
+      sendFinal();
+      finalTextRef.current = "";
       setInterimText("");
-      if (silenceTimeoutRef.current) {
-        clearTimeout(silenceTimeoutRef.current);
-        silenceTimeoutRef.current = null;
-      }
     };
 
     recognition.onerror = (event: any) => {
-      if (event.error === 'aborted' || event.error === 'no-speech') {
+      if (event.error === "aborted" || event.error === "no-speech") {
         setIsListening(false);
         isListeningRef.current = false;
         return;
@@ -138,75 +146,71 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
+      // THE FIX: Build transcript fresh from ALL results
+      // instead of appending to previous — this stops the repetition
+      let fullFinal = "";
+      let currentInterim = "";
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
-        // Use the best alternative
         const transcript = result[0].transcript;
         if (result.isFinal) {
-          finalTranscript += transcript;
+          fullFinal += transcript;
         } else {
-          interimTranscript += transcript;
+          currentInterim = transcript; // Only show LATEST interim
         }
       }
 
-      if (finalTranscript.trim()) {
-        // Accumulate final text
-        accumulatedRef.current = (
-          accumulatedRef.current + " " + finalTranscript.trim()
-        ).trim();
-        setInterimText("");
+      // Update interim display — replace, never append
+      setInterimText(currentInterim);
 
-        // Reset silence timer — send after 1.5 seconds of silence
-        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-        silenceTimeoutRef.current = setTimeout(() => {
-          sendAccumulated();
-          // Stop listening after sending
+      if (fullFinal.trim()) {
+        finalTextRef.current = fullFinal.trim();
+
+        // Reset silence timer — send 1.5s after user stops talking
+        clearSilenceTimer();
+        silenceTimerRef.current = setTimeout(() => {
+          sendFinal();
           try { recognition.stop(); } catch {}
         }, 1500);
-      } else if (interimTranscript) {
-        setInterimText(interimTranscript);
-        // Reset silence timer on interim activity
-        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      } else {
+        // User still speaking interim — reset timer
+        clearSilenceTimer();
       }
     };
 
     recognitionRef.current = recognition;
 
     return () => {
-      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      clearSilenceTimer();
       try { recognition.abort(); } catch {}
     };
-  }, [sendAccumulated]);
+  }, [sendFinal]);
 
   const start = useCallback(() => {
     if (!recognitionRef.current || isListeningRef.current) return;
-    accumulatedRef.current = "";
+    finalTextRef.current = "";
     hasSentRef.current = false;
     setInterimText("");
     try {
       recognitionRef.current.start();
     } catch (e: any) {
-      if (e.message?.includes('already started')) {
+      if (e.message?.includes("already started")) {
         try { recognitionRef.current.stop(); } catch {}
         setTimeout(() => {
-          try {
-            accumulatedRef.current = "";
-            hasSentRef.current = false;
-            recognitionRef.current?.start();
-          } catch {}
-        }, 300);
+          finalTextRef.current = "";
+          hasSentRef.current = false;
+          try { recognitionRef.current?.start(); } catch {}
+        }, 400);
       }
     }
   }, []);
 
   const stop = useCallback(() => {
-    if (!recognitionRef.current) return;
-    sendAccumulated();
-    try { recognitionRef.current.stop(); } catch {}
-  }, [sendAccumulated]);
+    clearSilenceTimer();
+    sendFinal();
+    try { recognitionRef.current?.stop(); } catch {}
+  }, [sendFinal]);
 
   const toggle = useCallback(() => {
     if (isListening) stop();
@@ -221,4 +225,4 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     isSupported,
     interimText,
   };
-}; 
+};
