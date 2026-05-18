@@ -70,12 +70,13 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   const [interimText, setInterimText] = useState("");
 
   const recognitionRef = useRef<any>(null);
-  const finalTextRef = useRef<string>("");
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onResultRef = useRef(options.onResult);
   const onErrorRef = useRef(options.onError);
   const hasSentRef = useRef(false);
   const isListeningRef = useRef(false);
+  // KEY FIX: track the index of the last processed final result
+  const lastProcessedIndexRef = useRef(0);
 
   useEffect(() => {
     onResultRef.current = options.onResult;
@@ -89,29 +90,16 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     }
   };
 
-  const sendFinal = useCallback(() => {
-    const text = finalTextRef.current.trim();
-    if (text.length >= 2 && !hasSentRef.current) {
-      hasSentRef.current = true;
-      onResultRef.current(text);
-      finalTextRef.current = "";
-      setInterimText("");
-    }
-  }, []);
-
   useEffect(() => {
     const SpeechRecognitionAPI =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionAPI) {
-      setIsSupported(false);
-      return;
-    }
-    setIsSupported(true);
+    setIsSupported(!!SpeechRecognitionAPI);
+    if (!SpeechRecognitionAPI) return;
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true;
+    // continuous=false on Android is more reliable for single utterances
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognition.maxAlternatives = 1;
@@ -119,8 +107,8 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     recognition.onstart = () => {
       setIsListening(true);
       isListeningRef.current = true;
-      finalTextRef.current = "";
       hasSentRef.current = false;
+      lastProcessedIndexRef.current = 0;
       setInterimText("");
     };
 
@@ -128,13 +116,11 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
       setIsListening(false);
       isListeningRef.current = false;
       clearSilenceTimer();
-      sendFinal();
-      finalTextRef.current = "";
       setInterimText("");
     };
 
     recognition.onerror = (event: any) => {
-      if (event.error === "aborted" || event.error === "no-speech") {
+      if (event.error === 'aborted' || event.error === 'no-speech') {
         setIsListening(false);
         isListeningRef.current = false;
         return;
@@ -146,36 +132,37 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognition.onresult = (event: any) => {
-      // THE FIX: Build transcript fresh from ALL results
-      // instead of appending to previous — this stops the repetition
-      let fullFinal = "";
+      // KEY FIX: Only process NEW results using resultIndex
+      // This stops words from being repeated
+      let newFinalText = "";
       let currentInterim = "";
 
-      for (let i = 0; i < event.results.length; i++) {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        const transcript = result[0].transcript;
+        const transcript = result[0].transcript.trim();
         if (result.isFinal) {
-          fullFinal += transcript;
+          newFinalText += (newFinalText ? " " : "") + transcript;
         } else {
-          currentInterim = transcript; // Only show LATEST interim
+          currentInterim = transcript;
         }
       }
 
-      // Update interim display — replace, never append
-      setInterimText(currentInterim);
-
-      if (fullFinal.trim()) {
-        finalTextRef.current = fullFinal.trim();
-
-        // Reset silence timer — send 1.5s after user stops talking
+      // Update interim display
+      if (currentInterim) {
+        setInterimText(currentInterim);
         clearSilenceTimer();
-        silenceTimerRef.current = setTimeout(() => {
-          sendFinal();
-          try { recognition.stop(); } catch {}
-        }, 1500);
-      } else {
-        // User still speaking interim — reset timer
+      }
+
+      if (newFinalText) {
+        setInterimText("");
         clearSilenceTimer();
+
+        if (!hasSentRef.current) {
+          hasSentRef.current = true;
+          onResultRef.current(newFinalText);
+        }
+
+        try { recognition.stop(); } catch {}
       }
     };
 
@@ -185,20 +172,19 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
       clearSilenceTimer();
       try { recognition.abort(); } catch {}
     };
-  }, [sendFinal]);
+  }, []);
 
   const start = useCallback(() => {
     if (!recognitionRef.current || isListeningRef.current) return;
-    finalTextRef.current = "";
     hasSentRef.current = false;
+    lastProcessedIndexRef.current = 0;
     setInterimText("");
     try {
       recognitionRef.current.start();
     } catch (e: any) {
-      if (e.message?.includes("already started")) {
+      if (e.message?.includes('already started')) {
         try { recognitionRef.current.stop(); } catch {}
         setTimeout(() => {
-          finalTextRef.current = "";
           hasSentRef.current = false;
           try { recognitionRef.current?.start(); } catch {}
         }, 400);
@@ -208,9 +194,8 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
 
   const stop = useCallback(() => {
     clearSilenceTimer();
-    sendFinal();
     try { recognitionRef.current?.stop(); } catch {}
-  }, [sendFinal]);
+  }, []);
 
   const toggle = useCallback(() => {
     if (isListening) stop();
