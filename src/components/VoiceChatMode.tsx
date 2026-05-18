@@ -25,31 +25,27 @@ const VoiceChatMode = ({
   messages,
 }: VoiceChatModeProps) => {
   const { toast } = useToast();
-  const [status, setStatus] = useState<
-    "idle" | "listening" | "processing" | "speaking"
-  >("idle");
+  const [status, setStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
+  const [started, setStarted] = useState(false);
   const processingRef = useRef(false);
   const wasInterruptedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const {
-    speak,
-    stop: stopSpeaking,
-    isSpeaking,
-    isLoading: ttsLoading,
-  } = useElevenLabsSpeech({
-    onEnd: () => {
-      wasInterruptedRef.current = false;
-      setStatus("listening");
-    },
-    onError: () => {
-      setStatus("listening");
-    },
-  });
+  const { speak, stop: stopSpeaking, isSpeaking, isLoading: ttsLoading } =
+    useElevenLabsSpeech({
+      onEnd: () => {
+        wasInterruptedRef.current = false;
+        if (isActiveRef.current) setStatus("listening");
+      },
+      onError: () => {
+        if (isActiveRef.current) setStatus("listening");
+      },
+    });
 
   const ttsActive = isSpeaking || ttsLoading;
+  const isActiveRef = useRef(false);
 
-  const handleUserStartedSpeaking = useCallback(() => {
+  const handleSpeechDetected = useCallback(() => {
     if (ttsActive) {
       wasInterruptedRef.current = true;
       stopSpeaking();
@@ -62,7 +58,7 @@ const VoiceChatMode = ({
       silenceThreshold: 5000,
       minTranscriptLength: 3,
       isTTSPlaying: ttsActive,
-      onSpeechDetected: handleUserStartedSpeaking,
+      onSpeechDetected: handleSpeechDetected,
       onTranscript: async (text) => {
         if (processingRef.current) return;
         processingRef.current = true;
@@ -77,22 +73,23 @@ const VoiceChatMode = ({
         }
       },
       onError: (error) => {
-        if (error === "not-allowed") {
+        if (error === "not-allowed" || error === "audio-capture") {
           toast({
             title: "Microphone access needed",
-            description: "Please allow microphone access in your browser settings",
+            description: "Please allow microphone access in Chrome settings and try again.",
             variant: "destructive",
           });
+          setStarted(false);
+          isActiveRef.current = false;
           deactivate();
         }
       },
     });
 
-  // Auto activate on mount
+  // DO NOT auto-activate — wait for user tap (Android requirement)
   useEffect(() => {
-    const timer = setTimeout(() => activate(), 600);
     return () => {
-      clearTimeout(timer);
+      isActiveRef.current = false;
       deactivate();
       stopSpeaking();
     };
@@ -100,18 +97,28 @@ const VoiceChatMode = ({
 
   // Sync status
   useEffect(() => {
+    if (!started) return;
     if (ttsActive) setStatus("speaking");
     else if (processingRef.current) setStatus("processing");
     else if (isListening) setStatus("listening");
     else if (isActive) setStatus("idle");
-  }, [ttsActive, isListening, isActive]);
+  }, [ttsActive, isListening, isActive, started]);
 
   // Auto scroll
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, interimText]);
+
+  // Handle start — must be from direct user tap for Android mic permission
+  const handleStart = () => {
+    setStarted(true);
+    isActiveRef.current = true;
+    setStatus("listening");
+    activate();
+  };
 
   const handleExit = () => {
+    isActiveRef.current = false;
     deactivate();
     stopSpeaking();
     onExit();
@@ -121,73 +128,56 @@ const VoiceChatMode = ({
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 p-6">
         <MicOff className="h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground text-center text-sm">
-          Voice chat is not supported in your browser. Please use Chrome or Edge.
+        <p className="text-sm text-muted-foreground text-center">
+          Voice chat requires Chrome or Edge browser.
         </p>
-        <Button onClick={onExit} variant="outline">
-          Back to Text Chat
-        </Button>
+        <Button onClick={onExit} variant="outline">Back to Text Chat</Button>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* Top status bar */}
-      <div className="flex-none flex items-center justify-between px-5 py-3 border-b border-border">
-        <span className="text-sm font-semibold text-foreground">
-          Voice Chat
-        </span>
-        <span
-          className={`text-xs font-medium tracking-wide uppercase transition-colors ${
-            status === "listening"
-              ? "text-emerald-500"
-              : status === "processing" || status === "speaking"
-              ? "text-primary"
-              : "text-muted-foreground"
-          }`}
-        >
-          {status === "listening"
-            ? "● Listening"
-            : status === "processing"
-            ? "● Thinking..."
-            : status === "speaking"
-            ? "● Speaking"
-            : "Starting..."}
+
+      {/* Status bar */}
+      <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-border">
+        <span className="text-sm font-bold">Voice Chat</span>
+        <span className={`text-xs font-semibold tracking-wide ${
+          status === "listening" ? "text-emerald-500" :
+          status === "processing" || status === "speaking" ? "text-primary" :
+          "text-muted-foreground"
+        }`}>
+          {!started ? "Tap mic to start" :
+           status === "listening" ? "● Listening" :
+           status === "processing" ? "● Thinking..." :
+           status === "speaking" ? "● Speaking" : "● Ready"}
         </span>
       </div>
 
-      {/* Conversation transcript */}
+      {/* Transcript */}
       <ScrollArea className="flex-1 px-4 py-4">
         <div className="space-y-3 max-w-lg mx-auto">
           {messages.length === 0 && (
             <p className="text-center text-muted-foreground text-sm py-8">
-              Start speaking — I'm listening.
+              {started
+                ? "Speak — I'll wait 5 seconds of silence before responding."
+                : "Tap the mic button below to start."}
             </p>
           )}
           {messages.slice(-20).map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${
-                msg.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              <div
-                className={`max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-tr-sm"
-                    : "bg-muted text-foreground rounded-tl-sm"
-                }`}
-              >
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-primary text-primary-foreground rounded-tr-sm"
+                  : "bg-muted text-foreground rounded-tl-sm"
+              }`}>
                 {msg.content}
               </div>
             </div>
           ))}
-
-          {/* Interim text bubble */}
           {interimText && (
             <div className="flex justify-end">
-              <div className="max-w-[82%] px-4 py-3 rounded-2xl text-sm bg-primary/20 text-primary rounded-tr-sm italic">
+              <div className="max-w-[82%] px-4 py-3 rounded-2xl text-sm bg-primary/15 text-primary rounded-tr-sm italic">
                 {interimText}...
               </div>
             </div>
@@ -196,91 +186,86 @@ const VoiceChatMode = ({
         </div>
       </ScrollArea>
 
-      {/* Central orb — fixed size always, no expand/contract */}
+      {/* Orb */}
       <div className="flex-none flex flex-col items-center py-6 gap-3 border-t border-border">
-        {/* Fixed size orb */}
-        <div className="relative flex items-center justify-center w-24 h-24">
-          {/* Subtle glow — only color changes, no size change */}
-          <div
-            className={`absolute inset-0 rounded-full transition-colors duration-500 ${
-              status === "listening"
-                ? "bg-emerald-500/10"
-                : status === "processing" || status === "speaking"
-                ? "bg-primary/10"
-                : "bg-transparent"
-            }`}
-            style={{ transform: "scale(1.5)" }}
-          />
-
-          {/* Orb — always same size */}
-          <div
-            className={`w-24 h-24 rounded-full flex items-center justify-center border-2 transition-colors duration-500 ${
-              status === "listening"
-                ? "bg-emerald-500/15 border-emerald-500/50"
-                : status === "processing"
-                ? "bg-primary/15 border-primary/40"
-                : status === "speaking"
-                ? "bg-primary/20 border-primary/50"
-                : "bg-muted border-border"
-            }`}
-          >
-            {status === "processing" ? (
-              <Loader2 className="h-9 w-9 text-primary animate-spin" />
-            ) : status === "speaking" ? (
-              <Volume2 className="h-9 w-9 text-primary" />
-            ) : (
-              <Mic
-                className={`h-9 w-9 ${
-                  status === "listening"
-                    ? "text-emerald-500"
-                    : "text-muted-foreground"
-                }`}
-              />
-            )}
-          </div>
+        <div
+          className={`w-24 h-24 rounded-full flex items-center justify-center border-2 transition-colors duration-500 cursor-pointer ${
+            !started
+              ? "bg-primary/10 border-primary/40 hover:bg-primary/20"
+              : status === "listening"
+              ? "bg-emerald-500/15 border-emerald-500/50"
+              : status === "processing"
+              ? "bg-primary/15 border-primary/40"
+              : status === "speaking"
+              ? "bg-primary/20 border-primary/50"
+              : "bg-muted border-border"
+          }`}
+          onClick={!started ? handleStart : undefined}
+        >
+          {!started ? (
+            <Mic className="h-10 w-10 text-primary" />
+          ) : status === "processing" ? (
+            <Loader2 className="h-10 w-10 text-primary animate-spin" />
+          ) : status === "speaking" ? (
+            <Volume2 className="h-10 w-10 text-primary" />
+          ) : (
+            <Mic className={`h-10 w-10 ${status === "listening" ? "text-emerald-500" : "text-muted-foreground"}`} />
+          )}
         </div>
 
-        {/* Status hint */}
-        <p className="text-xs text-muted-foreground text-center px-6">
-          {status === "listening"
+        <p className="text-xs text-muted-foreground text-center px-8">
+          {!started
+            ? "Tap the mic to start — microphone permission required"
+            : status === "listening"
             ? "Speak now — 5 seconds of silence sends your message"
             : status === "speaking"
-            ? "Speak to interrupt"
+            ? "Speak to interrupt the response"
             : status === "processing"
             ? "Generating response..."
             : "Getting ready..."}
         </p>
       </div>
 
-      {/* Bottom controls */}
+      {/* Controls */}
       <div className="flex-none flex items-center justify-center gap-5 py-5 border-t border-border">
-        {ttsActive && (
+        {!started ? (
           <Button
-            onClick={() => {
-              wasInterruptedRef.current = true;
-              stopSpeaking();
-              setStatus("listening");
-            }}
+            onClick={handleStart}
             size="lg"
-            variant="secondary"
-            className="rounded-full h-12 px-6 gap-2"
+            className="rounded-full h-13 px-8 gap-2 bg-gradient-primary text-white font-semibold shadow-lg"
           >
-            <Square className="h-4 w-4 fill-current" />
-            Stop
+            <Mic className="h-5 w-5" />
+            Tap to Start
           </Button>
+        ) : (
+          <>
+            {ttsActive && (
+              <Button
+                onClick={() => {
+                  wasInterruptedRef.current = true;
+                  stopSpeaking();
+                  setStatus("listening");
+                }}
+                size="lg"
+                variant="secondary"
+                className="rounded-full h-12 px-6 gap-2"
+              >
+                <Square className="h-4 w-4 fill-current" />
+                Stop
+              </Button>
+            )}
+            <Button
+              onClick={handleExit}
+              size="lg"
+              className="rounded-full h-14 w-14 bg-destructive hover:bg-destructive/90 shadow-lg"
+            >
+              <Phone className="h-6 w-6 rotate-[135deg]" />
+            </Button>
+          </>
         )}
-
-        {/* End call */}
-        <Button
-          onClick={handleExit}
-          size="lg"
-          className="rounded-full h-14 w-14 bg-destructive hover:bg-destructive/90 shadow-lg"
-        >
-          <Phone className="h-6 w-6 rotate-[135deg]" />
-        </Button>
       </div>
     </div>
   );
 };
 
-export default VoiceChatMode;
+export default VoiceChatMode; 
