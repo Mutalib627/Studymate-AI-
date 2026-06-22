@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useElevenLabsSpeech } from "@/hooks/useElevenLabsSpeech";
+import { supabase } from "@/integrations/supabase/client";
 
 interface UseBrowserSpeechOptions {
   onEnd?: () => void;
@@ -53,14 +54,73 @@ export const useBrowserSpeech = (options?: UseBrowserSpeechOptions) => {
   };
 };
 
+// ─── Detection helpers ──────────────────────────────────────────────────────
+
+/** True if the browser natively supports the Web Speech API */
+function hasWebSpeechAPI(): boolean {
+  return !!(
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition
+  );
+}
+
+/** True if the browser can record audio via MediaRecorder */
+function hasMediaRecorder(): boolean {
+  return !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+}
+
+// ─── MediaRecorder → OpenRouter Whisper transcription ───────────────────────
+
+async function transcribeWithWhisper(blob: Blob): Promise<string> {
+  // Convert to base64 and send to the ai-chat edge function
+  // We use a small Supabase edge function helper instead of calling OpenRouter
+  // directly from the browser (avoids exposing keys).
+  const arrayBuffer = await blob.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < uint8.length; i++) {
+    binary += String.fromCharCode(uint8[i]);
+  }
+  const base64 = btoa(binary);
+
+  const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+    body: {
+      audio: base64,
+      mimeType: blob.type || 'audio/webm',
+    },
+  });
+
+  if (error) throw new Error(error.message);
+  return (data?.text ?? '').trim();
+}
+
+// ─── Preferred MIME type for MediaRecorder ───────────────────────────────────
+
+function getBestMimeType(): string {
+  const types = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+  ];
+  for (const t of types) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
+// ─── Hook interfaces ─────────────────────────────────────────────────────────
+
 interface UseBrowserRecognitionOptions {
   onResult: (text: string) => void;
   onError?: (error: string) => void;
 }
 
-export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => {
+// ─── Web Speech API implementation (Chrome / Edge desktop + some Android) ───
+
+function useWebSpeechRecognition(options: UseBrowserRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
-  const [isSupported, setIsSupported] = useState(false);
   const [interimText, setInterimText] = useState("");
 
   const recognitionRef = useRef<any>(null);
@@ -69,7 +129,6 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
   const onErrorRef = useRef(options.onError);
   const isListeningRef = useRef(false);
   const sentRef = useRef(false);
-  // Store the single clean final result
   const finalResultRef = useRef("");
 
   useEffect(() => {
@@ -88,12 +147,9 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     const API =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-    setIsSupported(!!API);
     if (!API) return;
 
     const recognition = new API();
-    // continuous=false: fires one clean result then stops
-    // This avoids the accumulation problem entirely
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
@@ -112,8 +168,6 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
       isListeningRef.current = false;
       clearTimer();
       setInterimText("");
-
-      // Send whatever we have when recognition ends naturally
       const text = finalResultRef.current.trim();
       if (text && !sentRef.current) {
         sentRef.current = true;
@@ -135,34 +189,22 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognition.onresult = (event: any) => {
-      // With continuous=false, event.results contains ONE utterance
-      // The last result is the most complete version
-      // We take ONLY the final result when isFinal=true
-
       let finalTranscript = "";
       let interimTranscript = "";
-
-      // Only look at results from resultIndex onwards — ignore old ones
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0].transcript;
         if (result.isFinal) {
-          finalTranscript = text; // Replace, not append
+          finalTranscript = text;
         } else {
-          interimTranscript = text; // Replace, not append
+          interimTranscript = text;
         }
       }
-
-      if (interimTranscript) {
-        setInterimText(interimTranscript);
-      }
-
+      if (interimTranscript) setInterimText(interimTranscript);
       if (finalTranscript.trim()) {
         finalResultRef.current = finalTranscript.trim();
         setInterimText("");
         clearTimer();
-
-        // Send after short pause
         silenceTimerRef.current = setTimeout(() => {
           if (!sentRef.current && finalResultRef.current) {
             sentRef.current = true;
@@ -175,7 +217,6 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     };
 
     recognitionRef.current = recognition;
-
     return () => {
       clearTimer();
       try { recognition.abort(); } catch {}
@@ -211,5 +252,142 @@ export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => 
     else start();
   }, [isListening, start, stop]);
 
-  return { start, stop, toggle, isListening, isSupported, interimText };
-}; 
+  return { start, stop, toggle, isListening, interimText };
+}
+
+// ─── MediaRecorder implementation (Firefox, Safari 14.1+, Samsung Internet) ─
+
+function useMediaRecorderRecognition(options: UseBrowserRecognitionOptions) {
+  const [isListening, setIsListening] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const onResultRef = useRef(options.onResult);
+  const onErrorRef = useRef(options.onError);
+
+  useEffect(() => {
+    onResultRef.current = options.onResult;
+    onErrorRef.current = options.onError;
+  }, [options.onResult, options.onError]);
+
+  const start = useCallback(async () => {
+    if (isListening || isTranscribing) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      const mimeType = getBestMimeType();
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mr.onstop = async () => {
+        // Stop all tracks
+        stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        setIsListening(false);
+
+        if (chunksRef.current.length === 0) return;
+
+        const blob = new Blob(chunksRef.current, {
+          type: mr.mimeType || 'audio/webm',
+        });
+        chunksRef.current = [];
+
+        setIsTranscribing(true);
+        setInterimText("Transcribing...");
+        try {
+          const text = await transcribeWithWhisper(blob);
+          setInterimText("");
+          if (text) {
+            onResultRef.current(text);
+          }
+        } catch (err) {
+          setInterimText("");
+          onErrorRef.current?.("transcription-failed");
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current = mr;
+      mr.start(100); // collect data every 100ms
+      setIsListening(true);
+      setInterimText("Recording...");
+    } catch (err: any) {
+      const code = err?.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture';
+      onErrorRef.current?.(code);
+    }
+  }, [isListening, isTranscribing]);
+
+  const stop = useCallback(() => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    } else {
+      // clean up stream if somehow still open
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      setIsListening(false);
+    }
+  }, []);
+
+  const toggle = useCallback(() => {
+    if (isListening) stop();
+    else start();
+  }, [isListening, start, stop]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  return {
+    start,
+    stop,
+    toggle,
+    isListening: isListening || isTranscribing,
+    interimText,
+  };
+}
+
+// ─── Public hook: auto-picks the best available strategy ────────────────────
+
+export const useBrowserRecognition = (options: UseBrowserRecognitionOptions) => {
+  // Determine strategy once on mount
+  const useWebSpeech = hasWebSpeechAPI();
+  const useMedia = !useWebSpeech && hasMediaRecorder();
+  const isSupported = useWebSpeech || useMedia;
+
+  const webSpeech = useWebSpeechRecognition(options);
+  const mediaRec = useMediaRecorderRecognition(options);
+
+  if (useWebSpeech) {
+    return { ...webSpeech, isSupported: true };
+  }
+  if (useMedia) {
+    return { ...mediaRec, isSupported: true };
+  }
+
+  // Neither is available (very old browser)
+  return {
+    start: () => {},
+    stop: () => {},
+    toggle: () => {},
+    isListening: false,
+    interimText: "",
+    isSupported: false,
+  };
+};
