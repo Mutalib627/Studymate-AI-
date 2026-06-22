@@ -76,7 +76,7 @@ const VoiceChatMode = ({
         if (error === "not-allowed" || error === "audio-capture") {
           toast({
             title: "Microphone access needed",
-            description: "Please allow microphone access in Chrome settings and try again.",
+            description: "Please allow microphone access in your browser settings and try again.",
             variant: "destructive",
           });
           setStarted(false);
@@ -86,7 +86,6 @@ const VoiceChatMode = ({
       },
     });
 
-  // DO NOT auto-activate — wait for user tap (Android requirement)
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
@@ -95,7 +94,6 @@ const VoiceChatMode = ({
     };
   }, []);
 
-  // Sync status
   useEffect(() => {
     if (!started) return;
     if (ttsActive) setStatus("speaking");
@@ -104,12 +102,10 @@ const VoiceChatMode = ({
     else if (isActive) setStatus("idle");
   }, [ttsActive, isListening, isActive, started]);
 
-  // Auto scroll
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, interimText]);
 
-  // Handle start — must be from direct user tap for Android mic permission
   const handleStart = () => {
     setStarted(true);
     isActiveRef.current = true;
@@ -136,136 +132,166 @@ const VoiceChatMode = ({
     );
   }
 
+  // Status colour helpers
+  const statusColor =
+    status === "listening" ? "text-emerald-500" :
+    status === "processing" || status === "speaking" ? "text-primary" :
+    "text-muted-foreground";
+
+  const statusLabel =
+    !started ? "Tap mic to start" :
+    status === "listening" ? "● Listening" :
+    status === "processing" ? "● Thinking..." :
+    status === "speaking" ? "● Speaking" : "● Ready";
+
+  const orbColor =
+    !started
+      ? "bg-primary/10 border-primary/40 hover:bg-primary/20"
+      : status === "listening"
+      ? "bg-emerald-500/15 border-emerald-500/50"
+      : status === "processing"
+      ? "bg-primary/15 border-primary/40"
+      : status === "speaking"
+      ? "bg-primary/20 border-primary/50"
+      : "bg-muted border-border";
+
+  const hintText =
+    !started
+      ? "Tap the mic to start — microphone permission required"
+      : status === "listening"
+      ? "Speak now — 5 seconds of silence sends your message"
+      : status === "speaking"
+      ? "Speak to interrupt the response"
+      : status === "processing"
+      ? "Generating response..."
+      : "Getting ready...";
+
   return (
     <div className="flex flex-col h-full bg-background">
 
-      {/* Status bar */}
-      <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-border">
+      {/* ── Status bar ───────────────────────────────────────────────────── */}
+      <div className="flex-none flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border">
         <span className="text-sm font-bold">Voice Chat</span>
-        <span className={`text-xs font-semibold tracking-wide ${
-          status === "listening" ? "text-emerald-500" :
-          status === "processing" || status === "speaking" ? "text-primary" :
-          "text-muted-foreground"
-        }`}>
-          {!started ? "Tap mic to start" :
-           status === "listening" ? "● Listening" :
-           status === "processing" ? "● Thinking..." :
-           status === "speaking" ? "● Speaking" : "● Ready"}
+        <span className={`text-xs font-semibold tracking-wide ${statusColor}`}>
+          {statusLabel}
         </span>
       </div>
 
-      {/* Transcript */}
-      <ScrollArea className="flex-1 px-4 py-4">
-        <div className="space-y-3 max-w-lg mx-auto">
-          {messages.length === 0 && (
-            <p className="text-center text-muted-foreground text-sm py-8">
-              {started
-                ? "Speak — I'll wait 5 seconds of silence before responding."
-                : "Tap the mic button below to start."}
-            </p>
-          )}
-          {messages.slice(-20).map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-tr-sm"
-                  : "bg-muted text-foreground rounded-tl-sm"
-              }`}>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-          {interimText && (
-            <div className="flex justify-end">
-              <div className="max-w-[82%] px-4 py-3 rounded-2xl text-sm bg-primary/15 text-primary rounded-tr-sm italic">
-                {interimText}...
-              </div>
-            </div>
-          )}
-          <div ref={scrollRef} />
-        </div>
-      </ScrollArea>
+      {/* ── Main content: two-column on desktop, stacked on mobile ───────── */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
-      {/* Orb */}
-      <div className="flex-none flex flex-col items-center py-6 gap-3 border-t border-border">
-        <div
-          className={`w-24 h-24 rounded-full flex items-center justify-center border-2 transition-colors duration-500 cursor-pointer ${
-            !started
-              ? "bg-primary/10 border-primary/40 hover:bg-primary/20"
-              : status === "listening"
-              ? "bg-emerald-500/15 border-emerald-500/50"
-              : status === "processing"
-              ? "bg-primary/15 border-primary/40"
-              : status === "speaking"
-              ? "bg-primary/20 border-primary/50"
-              : "bg-muted border-border"
-          }`}
-          onClick={!started ? handleStart : undefined}
-        >
-          {!started ? (
-            <Mic className="h-10 w-10 text-primary" />
-          ) : status === "processing" ? (
-            <Loader2 className="h-10 w-10 text-primary animate-spin" />
-          ) : status === "speaking" ? (
-            <Volume2 className="h-10 w-10 text-primary" />
-          ) : (
-            <Mic className={`h-10 w-10 ${status === "listening" ? "text-emerald-500" : "text-muted-foreground"}`} />
-          )}
+        {/* ── Transcript panel ─────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden lg:border-r lg:border-border">
+          <ScrollArea className="flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+            <div className="space-y-3 sm:space-y-4 max-w-2xl mx-auto">
+              {messages.length === 0 && (
+                <p className="text-center text-muted-foreground text-sm py-10 sm:py-16">
+                  {started
+                    ? "Speak — I'll wait 5 seconds of silence before responding."
+                    : "Tap the mic button to start the conversation."}
+                </p>
+              )}
+              {messages.slice(-30).map((msg, i) => (
+                <div
+                  key={i}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[80%] sm:max-w-[72%] lg:max-w-[68%] px-4 py-3 rounded-2xl text-sm sm:text-[15px] leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-tr-sm"
+                        : "bg-muted text-foreground rounded-tl-sm"
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {interimText && (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] sm:max-w-[72%] px-4 py-3 rounded-2xl text-sm bg-primary/15 text-primary rounded-tr-sm italic">
+                    {interimText}...
+                  </div>
+                </div>
+              )}
+              <div ref={scrollRef} />
+            </div>
+          </ScrollArea>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center px-8">
-          {!started
-            ? "Tap the mic to start — microphone permission required"
-            : status === "listening"
-            ? "Speak now — 5 seconds of silence sends your message"
-            : status === "speaking"
-            ? "Speak to interrupt the response"
-            : status === "processing"
-            ? "Generating response..."
-            : "Getting ready..."}
-        </p>
-      </div>
+        {/* ── Controls panel: right column on desktop, bottom strip on mobile ── */}
+        <div className="flex-none lg:w-72 xl:w-80 flex flex-col items-center justify-center gap-5 sm:gap-6 px-4 sm:px-6 lg:px-8 py-5 sm:py-8 border-t lg:border-t-0 border-border bg-card/30">
 
-      {/* Controls */}
-      <div className="flex-none flex items-center justify-center gap-5 py-5 border-t border-border">
-        {!started ? (
-          <Button
-            onClick={handleStart}
-            size="lg"
-            className="rounded-full h-13 px-8 gap-2 bg-gradient-primary text-white font-semibold shadow-lg"
+          {/* Orb */}
+          <div
+            className={`
+              w-24 h-24 sm:w-32 sm:h-32 lg:w-40 lg:h-40
+              rounded-full flex items-center justify-center border-2
+              transition-colors duration-500 cursor-pointer
+              ${orbColor}
+              ${!started ? "shadow-lg" : ""}
+            `}
+            onClick={!started ? handleStart : undefined}
           >
-            <Mic className="h-5 w-5" />
-            Tap to Start
-          </Button>
-        ) : (
-          <>
-            {ttsActive && (
-              <Button
-                onClick={() => {
-                  wasInterruptedRef.current = true;
-                  stopSpeaking();
-                  setStatus("listening");
-                }}
-                size="lg"
-                variant="secondary"
-                className="rounded-full h-12 px-6 gap-2"
-              >
-                <Square className="h-4 w-4 fill-current" />
-                Stop
-              </Button>
+            {!started ? (
+              <Mic className="h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 text-primary" />
+            ) : status === "processing" ? (
+              <Loader2 className="h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 text-primary animate-spin" />
+            ) : status === "speaking" ? (
+              <Volume2 className="h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 text-primary" />
+            ) : (
+              <Mic className={`h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 ${status === "listening" ? "text-emerald-500" : "text-muted-foreground"}`} />
             )}
-            <Button
-              onClick={handleExit}
-              size="lg"
-              className="rounded-full h-14 w-14 bg-destructive hover:bg-destructive/90 shadow-lg"
-            >
-              <Phone className="h-6 w-6 rotate-[135deg]" />
-            </Button>
-          </>
-        )}
+          </div>
+
+          {/* Hint text */}
+          <p className="text-xs sm:text-sm text-muted-foreground text-center max-w-[220px] sm:max-w-xs lg:max-w-full">
+            {hintText}
+          </p>
+
+          {/* Buttons */}
+          <div className="flex items-center justify-center gap-4">
+            {!started ? (
+              <Button
+                onClick={handleStart}
+                size="lg"
+                className="rounded-full h-12 sm:h-14 px-8 sm:px-10 gap-2 bg-gradient-primary text-white font-semibold shadow-lg text-sm sm:text-base"
+              >
+                <Mic className="h-5 w-5" />
+                Tap to Start
+              </Button>
+            ) : (
+              <>
+                {ttsActive && (
+                  <Button
+                    onClick={() => {
+                      wasInterruptedRef.current = true;
+                      stopSpeaking();
+                      setStatus("listening");
+                    }}
+                    size="lg"
+                    variant="secondary"
+                    className="rounded-full h-12 sm:h-14 px-6 sm:px-8 gap-2 text-sm sm:text-base"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                    Stop
+                  </Button>
+                )}
+                <Button
+                  onClick={handleExit}
+                  size="lg"
+                  className="rounded-full h-14 w-14 sm:h-16 sm:w-16 bg-destructive hover:bg-destructive/90 shadow-lg"
+                  title="End voice chat"
+                >
+                  <Phone className="h-6 w-6 sm:h-7 sm:w-7 rotate-[135deg]" />
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-export default VoiceChatMode; 
+export default VoiceChatMode;
