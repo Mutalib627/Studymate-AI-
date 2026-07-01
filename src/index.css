@@ -2,7 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Instrument+Serif:ital@0;1&display=swap');
+/* Fonts are loaded from index.html <head> as real <link> tags instead of an
+   in-CSS @import — @import blocks the browser from discovering the font
+   request until the whole stylesheet is parsed, which was adding a second,
+   avoidable round-trip delay to first paint. */
 
 @layer base {
   :root {
