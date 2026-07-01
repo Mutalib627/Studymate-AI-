@@ -77,7 +77,7 @@ const ProductKeyRedemption = ({ userId }: ProductKeyRedemptionProps) => {
         });
       }
 
-      toast.success(`Premium activated for ${keyData.duration_days} days! 🎉`);
+      toast.success(`Premium activated for ${keyData.duration_days} days`);
       setKeyCode("");
       setIsOpen(false);
     } catch (error: any) {
@@ -174,4 +174,4 @@ const ProductKeyRedemption = ({ userId }: ProductKeyRedemptionProps) => {
   );
 };
 
-export default ProductKeyRedemption; 
+export default ProductKeyRedemption;
