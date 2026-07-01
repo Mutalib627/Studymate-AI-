@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BookOpen, BrainCircuit, FileText, Sparkles, TrendingUp } from "lucide-react";
+import { BookOpen, BrainCircuit, FileText, Check } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import StudyHelper from "@/components/StudyHelper";
 import QuizMaster from "@/components/QuizMaster";
@@ -87,49 +87,40 @@ const Index = () => {
       onSignOut={handleSignOut}
       activeTab={activeTab}
     >
-      <div className="max-w-4xl mx-auto space-y-4">
+      <div className="max-w-4xl mx-auto space-y-5">
 
-        {/* Welcome banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-hero p-5 sm:p-6 text-white shadow-lg-glow animate-float-up">
-          <div className="absolute inset-0 opacity-10" style={{
-            backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-            backgroundSize: "20px 20px"
-          }} />
-          <div className="absolute -right-6 -top-6 w-28 h-28 bg-white/5 rounded-full" />
-          <div className="relative flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-white/70 text-xs font-medium">{greeting} 👋</p>
-              <h2 className="text-lg sm:text-xl font-extrabold mt-0.5 truncate">{firstName}!</h2>
-              <p className="text-white/75 text-xs mt-1 hidden sm:block">
-                {uploadedContent ? "Your material is ready — start studying!" : "Upload a document to get started."}
-              </p>
-            </div>
-            <div className="flex-shrink-0 flex gap-2">
-              <div className="bg-white/15 backdrop-blur rounded-xl px-3 py-2 text-center">
-                <Sparkles className="w-3.5 h-3.5 text-white/80 mx-auto mb-1" />
-                <p className="text-[10px] text-white/70 whitespace-nowrap">AI Ready</p>
-              </div>
-            </div>
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4 animate-float-up">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">{greeting}</p>
+            <h2 className="text-xl sm:text-2xl font-extrabold mt-0.5 truncate">{firstName}</h2>
+          </div>
+          <div className="flex-shrink-0 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <span className={`h-1.5 w-1.5 rounded-full ${uploadedContent ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+            {uploadedContent ? "Material loaded" : "No material yet"}
           </div>
         </div>
 
         {/* Quick stats */}
         <div className="grid grid-cols-3 gap-2 sm:gap-3 animate-float-up" style={{ animationDelay: "0.05s" }}>
           {[
-            { icon: FileText, label: "Material", value: uploadedContent ? "✓ Loaded" : "Empty", color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-950/30" },
-            { icon: BookOpen, label: "Summary", value: "Ready", color: "text-violet-500", bg: "bg-violet-50 dark:bg-violet-950/30" },
-            { icon: BrainCircuit, label: "Quiz", value: "Ready", color: "text-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/30" },
+            { icon: FileText, label: "Material", value: uploadedContent ? "Loaded" : "Empty", done: !!uploadedContent },
+            { icon: BookOpen, label: "Summary", value: uploadedContent ? "Ready" : "Not yet", done: !!uploadedContent },
+            { icon: BrainCircuit, label: "Quiz", value: uploadedContent ? "Ready" : "Not yet", done: !!uploadedContent },
           ].map((item, i) => (
             <div
-              key={i}
+              key={item.label}
               className="stat-card p-3 sm:p-4 animate-float-up"
               style={{ animationDelay: `${0.08 + i * 0.05}s` }}
             >
-              <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg ${item.bg} flex items-center justify-center mb-2`}>
-                <item.icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${item.color}`} />
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/8 flex items-center justify-center mb-2">
+                <item.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" strokeWidth={1.75} />
               </div>
               <p className="text-[10px] sm:text-xs text-muted-foreground">{item.label}</p>
-              <p className={`text-xs sm:text-sm font-bold mt-0.5 ${item.color}`}>{item.value}</p>
+              <p className="text-xs sm:text-sm font-bold mt-0.5 flex items-center gap-1">
+                {item.done && <Check className="w-3 h-3 text-emerald-500 flex-shrink-0" strokeWidth={2.5} />}
+                {item.value}
+              </p>
             </div>
           ))}
         </div>
@@ -167,4 +158,4 @@ const Index = () => {
   );
 };
 
-export default Index; 
+export default Index;
