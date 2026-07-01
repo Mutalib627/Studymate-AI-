@@ -10,7 +10,6 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ArrowLeft, Search, Trash2, BookOpen, BrainCircuit, Calendar, Image, Download, MessageCircle, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format, formatDistanceToNow } from "date-fns";
-import jsPDF from "jspdf";
 
 interface StudySession {
   id: string;
@@ -91,7 +90,8 @@ const History = () => {
     setFilteredSessions(filtered);
   };
 
-  const downloadPDF = (session: StudySession) => {
+  const downloadPDF = async (session: StudySession) => {
+    const { default: jsPDF } = await import("jspdf");
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
