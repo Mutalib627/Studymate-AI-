@@ -61,27 +61,6 @@ const stats = [
   { value: "24/7", label: "AI Availability" },
 ];
 
-const plans = [
-  {
-    name: "Free",
-    price: "₦0",
-    period: "forever",
-    description: "Perfect for getting started",
-    features: ["5 summaries per day", "10 quiz questions", "Basic AI chat", "PDF upload"],
-    cta: "Get started free",
-    highlighted: false,
-  },
-  {
-    name: "Premium",
-    price: "₦2,000",
-    period: "per month",
-    description: "For serious students",
-    features: ["Unlimited summaries", "Unlimited quizzes", "RAG-powered chat", "Voice chat", "Priority support", "Study history"],
-    cta: "Upgrade to Premium",
-    highlighted: true,
-  },
-];
-
 const Landing = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -139,7 +118,7 @@ const Landing = () => {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1">
-            {["features", "pricing", "about", "contact"].map((s) => (
+            {["features", "about", "contact"].map((s) => (
               <button
                 key={s}
                 onClick={() => scrollTo(s)}
@@ -186,7 +165,7 @@ const Landing = () => {
         {mobileMenuOpen && (
           <div className="md:hidden bg-background/95 backdrop-blur-xl border-t border-border animate-float-up">
             <div className="p-3 space-y-1 max-w-6xl mx-auto">
-              {["features", "pricing", "about", "contact"].map((s) => (
+              {["features", "about", "contact"].map((s) => (
                 <button
                   key={s}
                   onClick={() => scrollTo(s)}
@@ -372,69 +351,6 @@ const Landing = () => {
               </div>
               <h3 className="text-sm sm:text-base font-bold mb-1.5">{f.title}</h3>
               <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">{f.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Pricing ─────────────────────────────────── */}
-      <section id="pricing" className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
-        <div className="text-center mb-10 sm:mb-14 animate-float-up">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/8 border border-primary/20 text-primary text-xs font-semibold mb-3">
-            Pricing
-          </div>
-          <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight mb-2">
-            Simple, transparent pricing
-          </h2>
-          <p className="text-sm sm:text-base text-muted-foreground">Start free, upgrade when you're ready.</p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-2xl mx-auto">
-          {plans.map((plan, i) => (
-            <div
-              key={i}
-              className={`relative rounded-2xl border p-6 animate-float-up ${
-                plan.highlighted
-                  ? "border-primary/30 shadow-lg-glow bg-gradient-to-b from-primary/5 to-card"
-                  : "border-border bg-card shadow-card"
-              }`}
-              style={{ animationDelay: `${i * 0.1}s` }}
-            >
-              {plan.highlighted && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-primary text-white text-[10px] font-bold px-4 py-1 rounded-full shadow-card whitespace-nowrap">
-                  Most Popular
-                </div>
-              )}
-
-              <div className="mb-5">
-                <p className="text-xs font-semibold text-muted-foreground mb-1">{plan.name}</p>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl sm:text-4xl font-extrabold">{plan.price}</span>
-                  <span className="text-xs text-muted-foreground">/{plan.period}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{plan.description}</p>
-              </div>
-
-              <ul className="space-y-2.5 mb-6">
-                {plan.features.map((feat, j) => (
-                  <li key={j} className="flex items-center gap-2 text-xs sm:text-sm">
-                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 ${plan.highlighted ? "text-primary" : "text-emerald-500"}`} />
-                    {feat}
-                  </li>
-                ))}
-              </ul>
-
-              <Button
-                onClick={() => navigate("/auth")}
-                className={`w-full h-10 sm:h-11 rounded-xl font-semibold text-sm transition-all ${
-                  plan.highlighted
-                    ? "bg-gradient-primary text-white shadow-card hover:shadow-glow"
-                    : ""
-                }`}
-                variant={plan.highlighted ? "default" : "outline"}
-              >
-                {plan.cta}
-              </Button>
             </div>
           ))}
         </div>
